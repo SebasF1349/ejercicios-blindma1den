@@ -1,5 +1,6 @@
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process"
+// check better-sqlite3 next time, looks interesting
 import sqlite3 from "sqlite3"
 import { open } from "sqlite"
 
@@ -15,80 +16,74 @@ import { open } from "sqlite"
 // The user can choose their preferred specialist.
 // The basic process is: Login -> Choose specialty -> Choose doctor -> Choose time slot.
 
-// db.serialize(() => {
-//     db.run(`CREATE TABLE specialty (
-//     id   INTEGER,
-//     name TEXT
-// )`).run(`INSERT INTO specialty (id, name) VALUES 
-// (0, "General Medicine"),
-// (1, "Emergency Care"),
-// (2, "Clinical Analysis"),
-// (3, "Cardiology"),
-// (4, "Neurology"),
-// (5, "Nutrition"),
-// (6, "Physiotherapy"),
-// (7, "Traumatology"),
-// (8, "Internal Medicine")
-// `)
-// });
+//CREATE TABLE specialty (
+//id   INTEGER PRIMARY KEY,
+//name TEXT
+//INSERT INTO specialty (id, name) VALUES 
+// ("General Medicine"),
+// ("Emergency Care"),
+// ("Clinical Analysis"),
+// ("Cardiology"),
+// ("Neurology"),
+// ("Nutrition"),
+// ("Physiotherapy"),
+// ("Traumatology"),
+// ("Internal Medicine")
 //
-// db.serialize(() => {
-//     db.run(`CREATE TABLE doctors (
-//     id        INTEGER,
-//     name      TEXT,
-//     specialty INTEGER
-// )`).run(`INSERT INTO doctors (id, name, specialty) VALUES 
-// (0, "Kike", 0),
-// (1, "Cancino", 0),
-// (2, "Neto", 0),
-// (3, "Itsa", 1),
-// (4, "Jayler", 1),
-// (5, "Pablo", 1),
-// (6, "ksreyr", 2),
-// (7, "Daniel", 2),
-// (8, "Pedro", 2),
-// (9, "Pablo Judas", 3),
-// (10, "Andres", 3),
-// (11, "Sebas", 3),
-// (12, "Daniela", 4),
-// (13, "Irene", 4),
-// (14, "Karen", 4),
-// (15, "Melissa", 5),
-// (16, "Valeria", 5),
-// (17, "Mercedes", 5),
-// (18, "Belen", 6),
-// (19, "Andrea", 6),
-// (20, "Benicio", 6),
-// (21, "Marcela", 7),
-// (22, "Jhoa", 7),
-// (23, "Auri", 7),
-// (24, "Seri", 8),
-// (25, "Analia", 8),
-// (26, "Jhoana", 8)
-// `)
-// });
+//CREATE TABLE doctors (
+//id        INTEGER PRIMARY KEY,
+//name      TEXT,
+//specialty INTEGER
 //
-// db.serialize(() => {
-//     db.run(`CREATE TABLE patients (
-//     id        INTEGER,
-//     name      TEXT,
-//     password  INTEGER,
-//     locked    INTEGER
-// )`).run(`INSERT INTO patients (id, name, password, locked) VALUES 
-// (0, "Kike", 123, 0),
-// (1, "Cancino", 573, 0),
-// (2, "Neto", 245, 0),
-// (3, "Itsa", 124, 1),
-// (4, "Jayler", 257, 0)`)
-// });
+//INSERT INTO doctors (id, name, specialty) VALUES 
+// ("Kike", 0),
+// ("Cancino", 0),
+// ("Neto", 0),
+// ("Itsa", 1),
+// ("Jayler", 1),
+// ("Pablo", 1),
+// ("ksreyr", 2),
+// ("Daniel", 2),
+// ("Pedro", 2),
+// ("Pablo Judas", 3),
+// ("Andres", 3),
+// ("Sebas", 3),
+// ("Daniela", 4),
+// ("Irene", 4),
+// ("Karen", 4),
+// ("Melissa", 5),
+// ("Valeria", 5),
+// ("Mercedes", 5),
+// ("Belen", 6),
+// ("Andrea", 6),
+// ("Benicio", 6),
+// ("Marcela", 7),
+// ("Jhoa", 7),
+// ("Auri", 7),
+// ("Seri", 8),
+// ("Analia", 8),
+// ("Jhoana", 8)
 //
-// db.run(`CREATE TABLE appointments (
-//     id          INTEGER,
+//CREATE TABLE patients (
+//id        INTEGER PRIMARY KEY,
+//name      TEXT,
+//password  INTEGER,
+//locked    INTEGER
+//
+// INSERT INTO patients (id, name, password, locked) VALUES 
+// ("Kike", 123, 0),
+// ("Cancino", 573, 0),
+// ("Neto", 245, 0),
+// ("Itsa", 124, 1),
+// ("Jayler", 257, 0)
+//
+//CREATE TABLE appointments (
+//     id          INTEGER PRIMARY KEY,
 //     patient_ID  INTEGER,
 //     doctor_ID   INTEGER,
 //     day         TEXT,
 //     hour        INTEGER
-// )`);
+//)
 
 
 let db = await open({
@@ -98,26 +93,48 @@ let db = await open({
 
 const rl = readline.createInterface({ input, output });
 
+let patient_id;
 // be aware we are locking the third username added
 for (let i = 0; i < 3; i++) {
     const username = await rl.question("Username: ");
     const password = await rl.question("Password: ");
-    if (await correctLogin(username, password)) break;
+    patient_id = await correctLogin(username, password);
+    if (patient_id) break;
     if (i === 2) {
         console.log("Tercer intento incorrecto. El usuario ha sido bloqueado.");
-        await userLocked(username);
+        await lockUser(username);
     } else {
         console.log("Usuario o contraseña incorrecta.");
     }
 }
 
 const specialties = await findSpecialties();
-const specialty_id = selectOption(specialties);
+const specialty_id = await selectOption(specialties);
+const alreadyUsedSpecialties = await getCurrentAppointmentSpecialties(patient_id);
+if (alreadyUsedSpecialties.includes(specialty_id)) {
+    console.log("Patient already have an appointment in that specialty");
+    process.exit(0);
+}
 
-const doctors = await findDoctors();
-const doctor_id = selectOption(doctors);
+const doctors = await findDoctors(specialty_id);
+const doctor_id = await selectOption(doctors);
 
-console.log("logueado!");
+const busyHours = await getBusyHours(doctor_id)
+// all numbers between 8 to 10 + 8 (18) and filter busy hours
+const availableHours = Array.from({ length: 10 }, (_, i) => 8 + i).filter((h) => !busyHours.includes(h));
+
+console.log("Available hours:");
+console.log(`${availableHours.join("\n")}`);
+const hour_selected = await rl.question("Select the preferred hour: ");
+
+if (!availableHours.includes(+hour_selected)) {
+    console.log("Incorrect hour");
+    process.exit(0);
+}
+
+await saveAppointment(patient_id, doctor_id, +hour_selected);
+
+console.log("Appointment saved.");
 
 db.close();
 rl.close();
@@ -127,18 +144,18 @@ async function selectOption(options) {
         console.log(`${option.id}. ${option.name}`);
     }
 
-    const option_answer = await rl.question("Select the option number: ");
+    const option_selected = await rl.question("Select the option number: ");
 
     let option_id = -1;
     for (const option of options) {
-        if (option.id === +option_answer) {
+        if (option.id === +option_selected) {
             option_id = option.id;
         }
     }
 
     if (option_id === -1) {
         console.log("Incorrect option id");
-        process.exit(1);
+        process.exit(0);
     }
 
     return option_id
@@ -151,46 +168,108 @@ WHERE name = "${username}" AND
 password = "${password}"`;
 
     try {
-        const { id, locked } = await db.get(sql);
-        return id !== undefined && locked === 0
+        const patient = await db.get(sql);
+        return patient?.locked === 0 ? patient.id : false;
     } catch (err) {
         console.log(`Error: ${err}`)
     }
 }
 
-async function userLocked(username) {
+async function lockUser(username) {
     let sql = `UPDATE patients
-            SET locked = 1
-            WHERE name = "${username}"`
+                SET locked = 1
+                WHERE name = "${username}"`
     try {
         await db.run(sql);
     } catch (err) {
         console.log(`Error: ${err}`)
     }
-    process.exit(1);
+    process.exit(0);
 }
 
 async function findSpecialties() {
     let sql = `SELECT id, name
-FROM specialty
-`;
+                FROM specialty`;
 
     try {
         return await db.all(sql);
     } catch (err) {
         console.log(`Error: ${err}`)
+        process.exit(0);
     }
 }
 
 async function findDoctors(specialty_id) {
     let sql = `SELECT id, name
-FROM doctors
-WHERE specialty = "${specialty_id}
-`;
+                FROM doctors
+                WHERE specialty = ${specialty_id}`;
 
     try {
         return await db.all(sql);
     } catch (err) {
         console.log(`Error: ${err}`)
+        process.exit(0);
+    }
+}
+
+// todo: this should be decoupled
+async function getCurrentAppointmentSpecialties(patient_id) {
+    let sql = `SELECT doctor_id
+                FROM appointments
+                WHERE patient_id = ${patient_id}`;
+
+    let doctors;
+    try {
+        doctors = await db.all(sql);
+    } catch (err) {
+        console.log(`error: ${err}`)
+        process.exit(0);
+    }
+
+    if (doctors?.length === 0) {
+        return []
+    }
+
+    if (doctors.length >= 3) {
+        console.log("The patient already have 3 appointments and can't take more.");
+        process.exit(0);
+    }
+
+    return doctors.map(async (d) => {
+        sql = `SELECT specialty
+                FROM doctors
+                WHERE id = ${d}`;
+
+        try {
+            return await db.get(sql);
+        } catch (err) {
+            console.log(`Error: ${err}`)
+            process.exit(0);
+        }
+    });
+}
+
+async function getBusyHours(doctor_id) {
+    let sql = `SELECT hour
+                FROM appointments
+                WHERE doctor_ID = ${doctor_id}`;
+
+    try {
+        return await db.all(sql);
+    } catch (err) {
+        console.log(`error: ${err}`)
+        process.exit(0);
+    }
+}
+
+async function saveAppointment(patient_id, doctor_id, hour) {
+    let sql = `INSERT INTO appointments (patient_ID, doctor_ID, day, hour) VALUES 
+                (${patient_id}, ${doctor_id}, "70-1-1", ${hour})`;
+
+    try {
+        return await db.run(sql);
+    } catch (err) {
+        console.log(`error: ${err}`)
+        process.exit(0);
     }
 }
